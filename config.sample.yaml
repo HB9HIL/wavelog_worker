@@ -1,0 +1,6 @@
+ws_port: 9000
+internal_port: 9001
+
+# Shared secret — must match worker_secret in Wavelog's worker.php config.
+# Minimum 32 characters, Recommended: 64 characters. Generate with: openssl rand -hex 32
+worker_secret: ""  # generate with: openssl rand -hex 32

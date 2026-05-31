@@ -1,0 +1,28 @@
+package config
+
+import (
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	WSPort       int    `yaml:"ws_port"`
+	InternalPort int    `yaml:"internal_port"`
+	WorkerSecret string `yaml:"worker_secret"`
+}
+
+func Load(p string) (*Config, error) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &Config{
+		WSPort:       9000,
+		InternalPort: 9001,
+	}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}

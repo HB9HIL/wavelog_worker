@@ -1,0 +1,21 @@
+wavelog_worker
+dist/*
+config.yaml
+config.*.yaml
+!config.sample.yaml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go
+*.test
+*.out
