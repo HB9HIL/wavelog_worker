@@ -10,6 +10,7 @@ type Config struct {
 	WSPort       int    `yaml:"ws_port"`
 	InternalPort int    `yaml:"internal_port"`
 	WorkerSecret string `yaml:"worker_secret"`
+	RedisURL     string `yaml:"redis_url"` // optional, empty = single-instance mode
 }
 
 func Load(p string) (*Config, error) {

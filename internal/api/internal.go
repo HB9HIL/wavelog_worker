@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/wavelog/wavelog_worker/internal/cluster"
 	"github.com/wavelog/wavelog_worker/internal/registry"
 	"github.com/wavelog/wavelog_worker/internal/sub"
 )
@@ -36,14 +37,15 @@ type unregisterRequest struct {
 
 type Server struct {
 	sub     *sub.Manager
+	pub     cluster.Publisher
 	reg     *registry.Registry
 	secret  string
 	version string
 	started time.Time
 }
 
-func NewServer(s *sub.Manager, reg *registry.Registry, secret, version string) *Server {
-	return &Server{sub: s, reg: reg, secret: secret, version: version, started: time.Now()}
+func NewServer(s *sub.Manager, pub cluster.Publisher, reg *registry.Registry, secret, version string) *Server {
+	return &Server{sub: s, pub: pub, reg: reg, secret: secret, version: version, started: time.Now()}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -125,7 +127,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "topic not registered", http.StatusNotFound)
 		return
 	}
-	s.sub.Publish(req.Topic, req.Payload)
+	s.pub.Publish(req.Topic, req.Payload)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -137,6 +139,7 @@ type statusResponse struct {
 	ActiveTopics     int      `json:"active_topics"`
 	Clients          int      `json:"connected_clients"`
 	TopicList        []string `json:"topic_list"`
+	ClusterNodes     int      `json:"cluster_nodes"` // -1 = single-instance mode
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +161,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ActiveTopics:     topics,
 		Clients:          clients,
 		TopicList:        regTopics,
+		ClusterNodes:     s.pub.ClusterNodes(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

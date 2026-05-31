@@ -4,3 +4,8 @@ internal_port: 9001
 # Shared secret — must match worker_secret in Wavelog's worker.php config.
 # Minimum 32 characters, Recommended: 64 characters. Generate with: openssl rand -hex 32
 worker_secret: ""  # generate with: openssl rand -hex 32
+
+# Optional: Redis URL for multi-instance clustering via Pub/Sub.
+# When set, all worker instances share broadcast events through Redis.
+# Omit or leave empty for single-instance mode (no Redis required).
+# redis_url: "redis://localhost:6379/2"  # /0-15 selects the Redis DB — use a dedicated one

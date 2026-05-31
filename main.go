@@ -13,6 +13,7 @@ import (
 
 	"github.com/wavelog/wavelog_worker/internal/api"
 	"github.com/wavelog/wavelog_worker/internal/auth"
+	"github.com/wavelog/wavelog_worker/internal/cluster"
 	"github.com/wavelog/wavelog_worker/internal/config"
 	"github.com/wavelog/wavelog_worker/internal/registry"
 	"github.com/wavelog/wavelog_worker/internal/sub"
@@ -37,7 +38,24 @@ func main() {
 	reg := registry.New()
 	authBr := auth.NewBridge(reg, cfg.WorkerSecret)
 	wsHdlr := ws.NewHandler(authBr, subMgr)
-	apiSvr := api.NewServer(subMgr, reg, cfg.WorkerSecret, version)
+
+	var pub cluster.Publisher
+	var rp *cluster.RedisPublisher
+	if cfg.RedisURL != "" {
+		var err error
+		rp, err = cluster.NewRedisPublisher(cfg.RedisURL, subMgr)
+		if err != nil {
+			log.Printf("cluster: redis unavailable, falling back to single-instance: %v", err)
+			pub = cluster.NewNoopPublisher(subMgr)
+		} else {
+			log.Printf("cluster: redis pub/sub active (%s)", cfg.RedisURL)
+			pub = rp
+		}
+	} else {
+		pub = cluster.NewNoopPublisher(subMgr)
+	}
+
+	apiSvr := api.NewServer(subMgr, pub, reg, cfg.WorkerSecret, version)
 
 	wsMux := http.NewServeMux()
 	wsMux.Handle("/ws", wsHdlr)
@@ -78,6 +96,10 @@ func main() {
 	ctx5, cancel5 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel5()
 	internalServer.Shutdown(ctx5)
+
+	if rp != nil {
+		rp.Close()
+	}
 
 	log.Println("stopped")
 }
