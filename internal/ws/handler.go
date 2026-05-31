@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/wavelog/wavelog_worker/internal/auth"
+	"github.com/wavelog/wavelog_worker/internal/registry"
 	"github.com/wavelog/wavelog_worker/internal/sub"
 )
 
@@ -62,19 +62,23 @@ func (c *Client) Send(payload json.RawMessage) {
 type Handler struct {
 	auth *auth.Bridge
 	sub  *sub.Manager
+	reg  *registry.Registry
 }
 
-func NewHandler(a *auth.Bridge, s *sub.Manager) *Handler {
-	return &Handler{auth: a, sub: s}
+func NewHandler(a *auth.Bridge, s *sub.Manager, reg *registry.Registry) *Handler {
+	return &Handler{auth: a, sub: s, reg: reg}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("session")
-	if sessionID == "" {
-		http.Error(w, "missing session", http.StatusBadRequest)
+	topic := r.URL.Query().Get("topic")
+	if topic == "" {
+		http.Error(w, "missing topic", http.StatusBadRequest)
 		return
 	}
-	topic := fmt.Sprintf("session.%s", sessionID)
+	if _, ok := h.reg.Lookup(topic); !ok {
+		http.Error(w, "topic not registered", http.StatusNotFound)
+		return
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

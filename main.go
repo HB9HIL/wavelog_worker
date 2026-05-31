@@ -37,7 +37,7 @@ func main() {
 	subMgr := sub.NewManager()
 	reg := registry.New()
 	authBr := auth.NewBridge(reg, cfg.WorkerSecret)
-	wsHdlr := ws.NewHandler(authBr, subMgr)
+	wsHdlr := ws.NewHandler(authBr, subMgr, reg)
 
 	var pub cluster.Publisher
 	var rp *cluster.RedisPublisher

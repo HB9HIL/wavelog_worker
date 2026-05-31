@@ -112,7 +112,7 @@ GET :9001/internal/status
 X-Worker-Secret: <secret>
 ```
 
-Response:
+Response (single instance):
 
 ```json
 {
@@ -122,24 +122,90 @@ Response:
   "registered_topics": 2,
   "active_topics": 1,
   "connected_clients": 3,
-  "topic_list": ["session.42", "session.7"]
+  "topic_list": ["session.42", "session.7"],
+  "cluster_nodes": -1
 }
 ```
+
+`cluster_nodes` is `-1` when Redis clustering is disabled. In cluster mode it returns the number of Worker instances currently subscribed to the Redis Pub/Sub channel (including this one).
+
+---
+
+## Cluster Mode
+
+By default each Worker instance is standalone. For high-availability or horizontal scaling, multiple instances can be connected via Redis Pub/Sub so that a publish to any one node is fan-out to all browsers across all nodes.
+
+```
+PHP
+ │  POST /internal/publish
+ ▼
+Worker-1 :9001 ──── Redis (wavelog:events channel) ────► Worker-2 :9001
+    │                                                         │
+    │ WebSocket                                         WebSocket
+    ▼                                                         ▼
+ Browsers on node 1                                    Browsers on node 2
+```
+
+A publish to Worker-1 is forwarded via Redis Pub/Sub to Worker-2, which then broadcasts it to its own connected browsers. An `origin_id` in the envelope prevents double-delivery on the originating node.
+
+### Configuration
+
+Add `redis_url` to `config.yaml`:
+
+```yaml
+ws_port: 9000
+internal_port: 9001
+worker_secret: ""
+redis_url: "redis://localhost:6379/2"  # DB 2 — avoid collision with other Redis users
+```
+
+The Redis URL follows the standard `redis://[user:pass@]host:port/db` format. Leave it empty (or omit the key) for single-instance mode.
+
+### Status in cluster mode
+
+```json
+{
+  "cluster_nodes": 3
+}
+```
+
+`cluster_nodes` reflects the number of active subscribers on the Redis channel at query time. This is the authoritative live count — no separate discovery infrastructure needed.
 
 ---
 
 ## PHP Integration
 
-The following components are required on the PHP side regardless of which feature uses the Worker:
-
 ### Config: `application/config/worker.php`
 
 ```php
-$config['worker_url']        = 'http://127.0.0.1:9001';  // internal port
-$config['worker_secret']     = '<min. 32 characters>';
-$config['worker_timeout']    = 1.0;                       // seconds, keep short
-$config['worker_client_url'] = 'wss://example.org:9000';  // browser-facing
+// Enable or disable the Worker integration entirely.
+$config['worker_enabled'] = true;
+
+// Internal URLs of wavelog_worker instances (PHP -> Worker, HTTP).
+// Single instance: one entry. Cluster: one entry per node.
+// PHP publishes to the first entry; the debug page shows status of all nodes.
+$config['worker_urls'] = [
+    'http://127.0.0.1:9001',
+    // 'http://127.0.0.1:9011',  // second node in cluster mode
+];
+
+// Shared secret — must match worker_secret in config.yaml.
+// Generate with: openssl rand -hex 32
+$config['worker_secret'] = '<min. 32 characters>';
+
+// Timeout for publish calls in seconds (float). Keep it short:
+// a slow worker must not block QSO saves.
+$config['worker_timeout'] = 1.0;
+
+// Public WebSocket URL for the browser (Browser -> Worker).
+// May differ from worker_urls when behind a reverse proxy.
+// Format: ws://host:port or wss://host:port. Empty = no WebSocket in browser.
+$config['worker_client_url'] = 'wss://example.org:9000';
 ```
+
+`worker_enabled = false` disables all Worker calls without requiring URL/secret removal. Useful for temporarily disabling the feature without losing the configuration.
+
+PHP always publishes to the **first entry** in `worker_urls`. In cluster mode Redis handles the fan-out to other nodes — PHP does not need to know all node URLs for publishing. The Wavelog debug page queries all configured URLs individually to show a per-node status overview.
 
 ### Library: `application/libraries/Worker_publisher.php`
 
@@ -158,7 +224,7 @@ $this->worker_publisher->publish('session.42', ['event' => 'qso_updated']);
 $this->worker_publisher->unregister_topic('session.42');
 ```
 
-All three methods are **fire-and-forget** — a PHP operation never fails because of the Worker. If the Worker is not configured, all methods are no-ops.
+All three methods are **fire-and-forget** — a PHP operation never fails because of the Worker. If the Worker is not configured or `worker_enabled` is `false`, all methods are no-ops.
 
 Errors are **not silently swallowed**: cURL errors (timeout, connection refused) and unexpected HTTP status codes are written to the CodeIgniter log via `log_message('error', ...)`. This makes an unreachable Worker visible in the application log without interrupting the request flow.
 
@@ -182,23 +248,57 @@ This token is passed to the browser via the PHP view (as a JS variable) and used
 ws_port: 9000        # browser-facing (public, optionally behind reverse proxy)
 internal_port: 9001  # PHP-facing (internal only!)
 worker_secret: ""    # min. 32 characters, generate with: openssl rand -hex 32
+
+# Cluster mode (optional): connect multiple instances via Redis Pub/Sub.
+# Leave empty or omit for single-instance mode.
+# redis_url: "redis://localhost:6379/2"
 ```
 
 ---
 
 ## Deployment
 
-### Docker Compose
+### Docker Compose (single instance)
 
 The Worker runs as its own container in the same Docker network as Wavelog. PHP reaches it via the internal container name; browsers connect through a reverse proxy.
 
 ```yaml
-wavelog_worker:
+wavelog-worker:
   image: ghcr.io/wavelog/wavelog_worker:latest
   ports:
     - "9000:9000"   # browser WebSocket (public)
     # do NOT publish port 9001 — internal only!
 ```
+
+### Docker Compose (cluster)
+
+Run multiple Worker containers sharing the same Redis instance. All containers use the same `config.yaml`; only the ports differ on the host side. The internal port 9001 is not published — PHP and the debug page reach nodes via their container names.
+
+```yaml
+wavelog-worker-1:
+  image: ghcr.io/wavelog/wavelog_worker:latest
+  ports:
+    - "9000:9000"   # browser WebSocket (VIP / load balancer target)
+
+wavelog-worker-2:
+  image: ghcr.io/wavelog/wavelog_worker:latest
+  # no host port needed — internal traffic only
+
+wavelog-worker-3:
+  image: ghcr.io/wavelog/wavelog_worker:latest
+```
+
+In `worker.php`, list all node URLs so the debug page can show individual node status:
+
+```php
+$config['worker_urls'] = [
+    'http://wavelog-worker-1:9001',
+    'http://wavelog-worker-2:9001',
+    'http://wavelog-worker-3:9001',
+];
+```
+
+PHP publishes to the first URL. Redis distributes the event to the other nodes.
 
 ### Binary + systemd
 
@@ -246,6 +346,9 @@ No persistent storage needed. PHP is the source of truth.
    → POST :9001/internal/publish
    → Worker broadcasts {"type":"push","payload":{"event":"qso_updated"}}
       to all subscribed browsers
+
+   In cluster mode: Worker also publishes to Redis → other nodes broadcast
+   to their own connected browsers.
 
 5. Browser receives push → triggers AJAX request to PHP → UI updates
 
