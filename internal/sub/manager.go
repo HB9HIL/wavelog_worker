@@ -53,10 +53,17 @@ func (m *Manager) UnsubscribeAll(s Subscriber) {
 // Publish sends payload to all subscribers of topic.
 // Non-blocking: slow clients drop frames.
 func (m *Manager) Publish(topic string, payload json.RawMessage) {
+	// Snapshot the subscribers under the lock — the inner map may be mutated
+	// concurrently by Subscribe/Unsubscribe, so we must not iterate it directly.
+	// Send is called outside the lock to keep Publish non-blocking.
 	m.mu.RLock()
 	set := m.subs[topic]
-	m.mu.RUnlock()
+	subs := make([]Subscriber, 0, len(set))
 	for s := range set {
+		subs = append(subs, s)
+	}
+	m.mu.RUnlock()
+	for _, s := range subs {
 		s.Send(payload)
 	}
 }

@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Add Tests for Wavelog Worker
+- Add Tests for Wavelog Worker (by @HB9HIL)
+
+### Fixed
+- Fixed a race condition in the subscriber manager (by @HB9HIL)
 
 ## [0.0.1] - 2026-06-14
 
