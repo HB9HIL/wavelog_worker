@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,9 +81,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := clientIP(r)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws: upgrade error: %v", err)
+		log.Printf("ws: upgrade error: %v ip=%s", err, ip)
 		return
 	}
 
@@ -91,6 +94,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		conn.Close()
+		log.Printf("ip=%s -- ws: auth handshake failed topic=%s: %v", ip, topic, err)
 		return
 	}
 	conn.SetReadDeadline(time.Time{})
@@ -99,12 +103,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(msg, &authFrame); err != nil || authFrame.Type != "auth" || authFrame.Token == "" {
 		conn.WriteMessage(websocket.TextMessage, mustMarshal(outboundFrame{Type: "error", Code: "auth_required", Message: "first frame must be {type:auth,token:...}"}))
 		conn.Close()
+		log.Printf("ip=%s -- ws: auth_required topic=%s", ip, topic)
 		return
 	}
 
 	if !h.auth.Validate(topic, authFrame.Token) {
 		conn.WriteMessage(websocket.TextMessage, mustMarshal(outboundFrame{Type: "error", Code: "unauthorized", Message: "invalid or expired token"}))
 		conn.Close()
+		log.Printf("ip=%s -- ws: unauthorized topic=%s", ip, topic)
 		return
 	}
 
@@ -118,14 +124,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.sub.Subscribe(topic, c)
-	log.Printf("ws: client connected topic=%s", topic)
+	log.Printf("ip=%s -- ws: client connected topic=%s", ip, topic)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer func() {
 		cancel()
 		conn.Close()
 		h.sub.UnsubscribeAll(c)
-		log.Printf("ws: client disconnected topic=%s", topic)
+		log.Printf("ip=%s -- ws: client disconnected topic=%s", ip, topic)
 	}()
 
 	go c.writePump(ctx)
@@ -178,4 +184,19 @@ func (c *Client) writePump(ctx context.Context) {
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// clientIP returns the originating client address, preferring the
+// X-Forwarded-For / X-Real-IP headers set by a reverse proxy over
+// r.RemoteAddr (which would otherwise show the proxy's address).
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if ip := strings.TrimSpace(strings.Split(xff, ",")[0]); ip != "" {
+			return ip
+		}
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return xrip
+	}
+	return r.RemoteAddr
 }

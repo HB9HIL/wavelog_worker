@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- WebSocket connect/disconnect log lines now include the client IP (`ip=`), taken from `X-Forwarded-For`/`X-Real-IP` if present, otherwise `RemoteAddr`. (by @HB9HIL)
+
 ## [0.0.3] - 2026-06-14
 
 ### Added
