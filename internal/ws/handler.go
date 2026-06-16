@@ -21,6 +21,10 @@ const (
 	readDeadline  = 60 * time.Second
 	authDeadline  = 10 * time.Second
 	sendBuf       = 32
+	// maxMessageSize caps inbound WS frames. The worker is push-only, so the
+	// only legitimate inbound frame is the tiny auth handshake; anything larger
+	// is rejected to prevent a single client exhausting memory.
+	maxMessageSize = 4 << 10 // 4 KiB
 )
 
 // upgrader accepts all origins — CSRF protection is handled by the HMAC token in
@@ -42,10 +46,11 @@ type outboundFrame struct {
 }
 
 type Client struct {
-	conn  *websocket.Conn
-	send  chan []byte
-	topic string
-	mu    sync.Mutex
+	conn   *websocket.Conn
+	send   chan []byte
+	topic  string
+	mu     sync.Mutex
+	closed bool
 }
 
 func (c *Client) Send(payload json.RawMessage) {
@@ -54,10 +59,26 @@ func (c *Client) Send(payload json.RawMessage) {
 	if err != nil {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
 	select {
 	case c.send <- data:
 	default:
 	}
+}
+
+// closeSend closes the send channel exactly once, under the lock, so a
+// concurrent Send never writes to a closed channel (which would panic).
+func (c *Client) closeSend() {
+	c.mu.Lock()
+	if !c.closed {
+		c.closed = true
+		close(c.send)
+	}
+	c.mu.Unlock()
 }
 
 type Handler struct {
@@ -88,6 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws: upgrade error: %v ip=%s", err, ip)
 		return
 	}
+	conn.SetReadLimit(maxMessageSize)
 
 	// Auth handshake: first frame must be { type: "auth", token: "<hmac>" }.
 	conn.SetReadDeadline(time.Now().Add(authDeadline))
@@ -130,7 +152,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		cancel()
 		conn.Close()
+		// Unsubscribe before closing the send channel so no Publish can pick
+		// up this client and write to a channel we are about to close.
 		h.sub.UnsubscribeAll(c)
+		c.closeSend()
 		log.Printf("ip=%s -- ws: client disconnected topic=%s", ip, topic)
 	}()
 
@@ -141,7 +166,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // readPump drains incoming frames and keeps the pong handler alive.
 // The worker is push-only — browser requests go directly to PHP via AJAX.
 func (c *Client) readPump() {
-	defer close(c.send)
 	c.conn.SetReadDeadline(time.Now().Add(readDeadline))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(readDeadline))
