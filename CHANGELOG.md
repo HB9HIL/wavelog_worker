@@ -8,8 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- Fixed a panic (send on closed channel) when a client disconnected while an event was being published to it. The WebSocket client now guards its send channel with a `closed` flag and unsubscribes before closing.
-- WebSocket connections now enforce a 4 KiB inbound frame limit (`SetReadLimit`), preventing a single client from exhausting memory with an oversized frame.
+- Fixed a panic (send on closed channel) when a client disconnected while an event was being published to it. The WebSocket client now guards its send channel with a `closed` flag and unsubscribes before closing. (by @int2001)
+- WebSocket connections now enforce a 4 KiB inbound frame limit (`SetReadLimit`), preventing a single client from exhausting memory with an oversized frame. (by @int2001)
 
 ## [0.0.5] - 2026-06-16
 ### Changed:
