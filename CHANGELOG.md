@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-27
+
 ### Changed
 - The `internal_bind` config option now defaults to `127.0.0.1` instead of `0.0.0.0`. This is a breaking change for docker users, as the Wavelog Worker will no longer be able to reach the internal API. If you run the Wavelog Worker in Docker you need to set `internal_bind` to `0.0.0.0` to allow Wavelog to reach the internal API. The Docker network isolation protects it. (by @HB9HIL)
 - Sanitize the client ip to prevent log injection. (by @HB9HIL)
