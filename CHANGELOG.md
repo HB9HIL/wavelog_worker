@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Added
+- Added websocket status handler so healthchecks can be performed on the websocket listener. (by @HB9HIL)
+
 ## [0.1.0] - 2026-06-27
 
 ### Changed
